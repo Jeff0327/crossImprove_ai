@@ -16,9 +16,12 @@ GENOME_PATH = pathlib.Path(__file__).with_name("genome.json")
 
 @dataclass
 class Genome:
-    # toy, documented knobs (stand-ins for "the agent's code/scaffolding")
+    # toy, documented knobs that ACTUALLY drive Agent.solve so the loop can
+    # demonstrate a real fitness gain without an LLM. strategy:
+    #   "naive"   -> buggy solver (off-by-one) -> low fitness
+    #   "correct" -> fixed solver              -> high fitness
     revision: int = 0
-    strategy: str = "direct"     # e.g. "direct" | "checked"
+    strategy: str = "correct"
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), sort_keys=True)
@@ -40,8 +43,15 @@ class Mutator:
 
 
 class ToyMutator(Mutator):
-    """Deterministic, real change — bumps revision so a diff exists to commit."""
+    """
+    Deterministic, real change. If the parent is "naive" it fixes the bug
+    ("correct") — a genuine, measurable improvement the gate will promote. Once
+    correct, it just bumps revision (a real diff, but no fitness change), so the
+    loop converges and then stops promoting noise — exactly the intended shape.
+    """
     def mutate(self, genome: Genome) -> Genome:
+        if genome.strategy == "naive":
+            return Genome(revision=genome.revision + 1, strategy="correct")
         return Genome(revision=genome.revision + 1, strategy=genome.strategy)
 
 

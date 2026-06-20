@@ -160,12 +160,15 @@ def main(generations: int = 6, seed: int = 0, do_commit: bool = False) -> None:
     sigma = gate.noise_floor([sum(measure(baseline, [t])) for t in floor_tasks])
 
     archive = Archive()
-    a, b = Agent("A", genome=Genome()), Agent("B", genome=Genome())
+    # seed both agents with the buggy "naive" strategy; a mutation can fix it,
+    # so the loop demonstrates a genuine measured improvement (PROMOTED) without
+    # an LLM. The fixed baseline above uses the default "correct" genome.
+    a = Agent("A", genome=Genome(strategy="naive"))
+    b = Agent("B", genome=Genome(strategy="naive"))
     archive.add(a, sum(measure(a, floor_tasks)) / len(floor_tasks))
     archive.add(b, sum(measure(b, floor_tasks)) / len(floor_tasks))
 
     for g in range(generations):
-        # ROLE SWAP: the two archived agents trade proposer/solver each generation
         # ROLE SWAP: the two archived agents alternate who proposes each generation
         proposer = archive.members[g % 2].agent
         parent = archive.sample(rng)                      # diversity sampling

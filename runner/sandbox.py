@@ -6,10 +6,13 @@ addresses review findings C1/C2/C3:
 
   * C3 — the verdict is returned over a DEDICATED result file, not stdout, so a
          verifier that prints fake JSON cannot spoof the result.
-  * C2 — the child runs in its own session/process group; on timeout the ENTIRE
-         group is SIGKILLed (os.killpg), so grandchildren the verifier spawned do
-         not leak. (Previously start_new_session created the group but nothing
-         killed it — fixed.)
+  * C2 — the child runs in its own session/process group; the ENTIRE group is
+         SIGKILLed (os.killpg) on every exit path, so grandchildren the verifier
+         spawned are reaped. This is BEST-EFFORT: a verifier that spawns AND exits
+         faster than we can signal can still race a grandchild out before the
+         kill lands. A hard guarantee needs a cgroup / PID namespace — i.e. the
+         container you must use for untrusted code anyway. Established
+         grandchildren (alive when verify() returns) are reliably reaped.
   * C1 — POSIX rlimits (CPU, address space, file size, NPROC) + a stripped env +
          isolated mode (-I) are applied before exec. Real but PARTIAL: it does NOT
          sandbox the filesystem or network. For untrusted self-generated code you
@@ -66,13 +69,14 @@ def _limits(cpu_seconds: int, mem_bytes: int):
     return _apply
 
 
-def _kill_group(proc) -> None:
+def _kill_pgid(pgid, proc) -> None:
     """SIGKILL the child's whole process group so grandchildren don't leak (C2)."""
     try:
-        if _POSIX:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        if _POSIX and pgid is not None:
+            os.killpg(pgid, signal.SIGKILL)
         else:  # pragma: no cover
-            proc.kill()
+            if proc is not None:
+                proc.kill()
     except (ProcessLookupError, PermissionError, OSError):
         pass
 
@@ -90,31 +94,49 @@ def verify(verifier_src: str, solution: str, timeout: float = 5.0,
     with open(src_path, "w") as f:
         f.write(_HARNESS.format(verifier_src=verifier_src, solution=solution))
 
+    err_path = os.path.join(workdir, "stderr.txt")
     env = {"PATH": "/usr/bin:/bin", "RESULT_FD_PATH": res_path}  # stripped env
-    popen_kw = dict(stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                    env=env, cwd=workdir)
+    # Verdict comes from the result FILE, so we DON'T pipe stdout. Crucially, using
+    # PIPE + communicate() would BLOCK until every inherited fd is closed — a
+    # grandchild holding the pipe open would stall us until it exits, defeating
+    # both the timeout and the group-kill. We redirect stdout to /dev/null and
+    # stderr to a file, and use wait() (which only tracks the direct child), so a
+    # lingering grandchild can neither stall us nor escape the prompt killpg.
+    errf = open(err_path, "w")
+    popen_kw = dict(stdout=subprocess.DEVNULL, stderr=errf, env=env, cwd=workdir)
     if _HAVE_RLIMIT:
         popen_kw["preexec_fn"] = _limits(int(timeout) + 1, mem_bytes)
     if _POSIX:
         popen_kw["start_new_session"] = True  # own process group
 
     proc = None
+    pgid = None
     try:
         proc = subprocess.Popen([sys.executable, "-I", src_path], **popen_kw)
-        try:
-            _, stderr = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            _kill_group(proc)                # C2: reap the whole group
+        if _POSIX:
             try:
-                proc.communicate(timeout=5)
+                pgid = os.getpgid(proc.pid)   # capture now; reaped after wait
+            except OSError:
+                pgid = None
+        try:
+            proc.wait(timeout=timeout)        # wait() does NOT block on inherited fds
+        except subprocess.TimeoutExpired:
+            _kill_pgid(pgid, proc)            # reap the whole group on timeout
+            try:
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 pass
             return {"ok": False, "error": "timeout"}
     except Exception as e:  # noqa: BLE001
-        if proc is not None:
-            _kill_group(proc)
+        _kill_pgid(pgid, proc)
         return {"ok": False, "error": repr(e)}
     finally:
+        # reap stragglers on EVERY path (best-effort; see module docstring)
+        _kill_pgid(pgid, proc)
+        try:
+            errf.close()
+        except OSError:
+            pass
         try:
             if os.path.exists(src_path):
                 os.unlink(src_path)
@@ -126,11 +148,16 @@ def verify(verifier_src: str, solution: str, timeout: float = 5.0,
             verdict = json.loads(f.read())
     except (OSError, json.JSONDecodeError):
         rc = getattr(proc, "returncode", "?")
+        try:
+            stderr = open(err_path).read()
+        except OSError:
+            stderr = ""
         verdict = {"ok": False, "error": f"no result (rc={rc}); stderr={(stderr or '')[:200]}"}
     finally:
         try:
-            if os.path.exists(res_path):
-                os.unlink(res_path)
+            for fn in (res_path, err_path):
+                if os.path.exists(fn):
+                    os.unlink(fn)
             os.rmdir(workdir)
         except OSError:
             pass

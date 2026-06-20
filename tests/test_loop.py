@@ -430,3 +430,53 @@ def test_role_swap_changes_proposer_across_generations():
     g0_proposer = arc.members[0 % 2].agent
     g1_proposer = arc.members[1 % 2].agent
     assert g0_proposer is a and g1_proposer is b   # behavioral alternation
+
+
+# --- [14] re-analysis fixes: C2 normal-exit reaping + genome-driven promotion -
+
+def test_established_grandchild_is_reaped_on_normal_exit(tmp_path):
+    # DELIVERABLE C2 guarantee: a grandchild that is ALIVE when verify() returns
+    # (the verifier briefly sleeps so it joins the group) is reaped on the normal
+    # exit path. (A faster-than-signal spawn-and-exit can race out — that needs a
+    # container, which is required for untrusted code anyway.)
+    import time
+    marker = tmp_path / "leaked"
+    verifier_src = (
+        "def check(s):\n"
+        "    import subprocess, sys, time\n"
+        f"    subprocess.Popen([sys.executable, '-c', \"import time; time.sleep(2); open({str(marker)!r}, 'w').write('x')\"])\n"
+        "    time.sleep(0.5)\n"           # let the grandchild establish in the group
+        "    return True\n"
+    )
+    res = sandbox.verify(verifier_src, "x", timeout=5.0)
+    assert res["ok"] is True
+    time.sleep(2.5)                         # past the grandchild's 2s sleep
+    assert not marker.exists()             # established grandchild was reaped
+
+def test_genome_drives_fitness_and_promotes():
+    from orchestrator.loop import generation, Member
+    from agent.agent import Agent
+    from agent.genome import Genome, ToyMutator
+    parent = Member(Agent("p", genome=Genome(strategy="naive")), 0.0)
+    proposer = Agent("prop")  # default "correct"; only proposes here
+    promoted, child = generation(proposer, parent, ToyMutator(),
+                                 n_tasks=6, seed_base=0, anchor_ok=True, sigma=0.0)
+    assert promoted is True                       # real measured improvement
+    assert child.agent.genome.strategy == "correct"
+
+def test_naive_agent_actually_scores_zero():
+    from agent.agent import Agent
+    from agent.genome import Genome
+    t = example_math.generate(seed=1)             # "Compute 6 + 20" -> 26
+    naive = Agent("n", genome=Genome(strategy="naive"))
+    correct = Agent("c", genome=Genome(strategy="correct"))
+    assert verifier.judge(t, naive.solve(t)).ok is False   # off-by-one -> wrong
+    assert verifier.judge(t, correct.solve(t)).ok is True
+
+def test_loop_main_prints_a_promotion():
+    import io, contextlib
+    from orchestrator import loop
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        loop.main(generations=2, seed=0, do_commit=False)
+    assert "PROMOTED" in buf.getvalue()

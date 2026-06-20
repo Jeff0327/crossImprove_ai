@@ -57,9 +57,14 @@ class Agent:
         """Produce a candidate solution in the format the verifier expects."""
         if self.llm is None:
             # toy fallback for the arithmetic domain: read the operands and add.
+            # genome.strategy DRIVES behavior so mutation can change fitness:
+            #   "naive"   -> off-by-one bug (wrong) ; "correct" -> right answer.
             nums = re.findall(r"-?\d+", task.prompt)
             if len(nums) >= 2 and "+" in task.prompt:
-                return str(int(nums[0]) + int(nums[1]))
+                total = int(nums[0]) + int(nums[1])
+                if self.genome.strategy == "naive":
+                    total += 1            # the bug a mutation can fix
+                return str(total)
             return ""  # unknown domain -> empty (will fail verification, honestly)
         raise NotImplementedError("LLM solving not wired")
 
