@@ -1,0 +1,181 @@
+<svg viewBox="0 0 1000 1620" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#8aa0b8"/>
+    </marker>
+    <marker id="arrAmber" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#e0a23a"/>
+    </marker>
+    <marker id="arrGreen" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#5bb08a"/>
+    </marker>
+    <marker id="arrLoop" markerWidth="11" markerHeight="11" refX="8" refY="3.2" orient="auto">
+      <path d="M0,0 L9,3.2 L0,6.4 Z" fill="#7d6bd0"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="1620" fill="#0e151c"/>
+
+  <!-- title -->
+  <text x="50" y="56" fill="#e8eef4" font-size="30" font-weight="700" letter-spacing="0.5">자기개선 Self-Play 루프</text>
+  <text x="50" y="84" fill="#6b8298" font-size="14">제안 · 토론 · 객관적 검증 · 진화  —  하나의 폐루프</text>
+  <text x="950" y="56" fill="#e0a23a" font-size="13" text-anchor="end">검증 비대칭성 = 모든 것의 축</text>
+  <line x1="50" y1="100" x2="950" y2="100" stroke="#22303d" stroke-width="1"/>
+
+  <!-- ===================== BAND 1: INPUT ===================== -->
+  <text x="50" y="138" fill="#7d6bd0" font-size="13" font-weight="700">① 입력 — 절차적 생성 + 도메인 라우터</text>
+  <rect x="50" y="150" width="900" height="118" rx="10" fill="#161f29" stroke="#2c3b49" stroke-width="1"/>
+
+  <rect x="68" y="170" width="250" height="80" rx="8" fill="#10202a" stroke="#3a6f63" stroke-width="1.3"/>
+  <text x="84" y="196" fill="#7fd8c0" font-size="14" font-weight="700">검증 가능</text>
+  <text x="84" y="218" fill="#9fb3c4" font-size="11.5">미해결 문제 · 코딩 · 최적화</text>
+  <text x="84" y="236" fill="#5bb08a" font-size="11">→ 자동 검증기 · 암기 불가</text>
+
+  <rect x="375" y="170" width="250" height="80" rx="8" fill="#231d12" stroke="#7a6326" stroke-width="1.3"/>
+  <text x="391" y="196" fill="#e0a23a" font-size="14" font-weight="700">반검증</text>
+  <text x="391" y="218" fill="#9fb3c4" font-size="11.5">참조 답 존재 · 루브릭</text>
+  <text x="391" y="236" fill="#c89030" font-size="11">→ ground-truth 닻 필수</text>
+
+  <rect x="682" y="170" width="250" height="80" rx="8" fill="#26161a" stroke="#7a3340" stroke-width="1.3"/>
+  <text x="698" y="196" fill="#e07a8a" font-size="14" font-weight="700">비검증</text>
+  <text x="698" y="218" fill="#9fb3c4" font-size="11.5">글쓰기 · 주관 · 개방형</text>
+  <text x="698" y="236" fill="#c05060" font-size="11">→ 자동루프 금지 · 사람 검토</text>
+
+  <path d="M500,268 L500,300" stroke="#8aa0b8" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- ===================== BAND 2: SELF-PLAY CORE ===================== -->
+  <text x="50" y="322" fill="#4fb0c8" font-size="13" font-weight="700">② Self-play 코어 — 두 모델의 공진화 (역할 교대)</text>
+  <rect x="50" y="334" width="900" height="250" rx="10" fill="#121b24" stroke="#2c3b49" stroke-width="1"/>
+
+  <!-- Proposer -->
+  <rect x="76" y="360" width="300" height="120" rx="9" fill="#0f1c26" stroke="#3a7d8f" stroke-width="1.5"/>
+  <text x="96" y="388" fill="#6fd0e0" font-size="15" font-weight="700">모델 A · 제안자</text>
+  <text x="96" y="412" fill="#cdd9e4" font-size="12">· 문제 생성 (매번 새 인스턴스)</text>
+  <text x="96" y="432" fill="#cdd9e4" font-size="12">· <tspan fill="#e0a23a" font-weight="700">검증 스크립트</tspan>를 함께 생성</text>
+  <text x="96" y="456" fill="#7e93a6" font-size="11">핵심: 답을 "판단"하지 않는다.</text>
+  <text x="96" y="472" fill="#7e93a6" font-size="11">틀리면 자동으로 터지는 검사를 만든다.</text>
+
+  <!-- Solver -->
+  <rect x="624" y="360" width="300" height="120" rx="9" fill="#0f1c26" stroke="#3a7d8f" stroke-width="1.5"/>
+  <text x="644" y="388" fill="#6fd0e0" font-size="15" font-weight="700">모델 B · 해결자</text>
+  <text x="644" y="412" fill="#cdd9e4" font-size="12">· 해답 생성</text>
+  <text x="644" y="432" fill="#cdd9e4" font-size="12">· 반론에 대한 반박</text>
+  <text x="644" y="456" fill="#7e93a6" font-size="11">통과 시 자기 자신을 업그레이드</text>
+  <text x="644" y="472" fill="#7e93a6" font-size="11">(weight 또는 스캐폴딩 진화)</text>
+
+  <!-- Debate in the middle -->
+  <rect x="406" y="372" width="188" height="96" rx="9" fill="#1a2330" stroke="#46566a" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="500" y="396" fill="#aeb9ff" font-size="13" font-weight="700" text-anchor="middle">토론 (N라운드 상한)</text>
+  <text x="500" y="420" fill="#cdd9e4" font-size="11.5" text-anchor="middle">반론 ⇄ 반박</text>
+  <text x="500" y="440" fill="#8a93c8" font-size="10.5" text-anchor="middle">진실 탐지기 아님</text>
+  <text x="500" y="456" fill="#8a93c8" font-size="10.5" text-anchor="middle">진실 <tspan fill="#aeb9ff" font-weight="700">증폭기</tspan> — 후보 정제</text>
+
+  <path d="M376,408 L404,408" stroke="#8aa0b8" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M596,430 L622,430" stroke="#8aa0b8" stroke-width="1.5" marker-end="url(#arr)"/>
+  <path d="M622,452 L596,452" stroke="#8aa0b8" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <text x="500" y="520" fill="#7e93a6" font-size="11" text-anchor="middle">⚠ 토론만으로는 "능력 상한에서 멈춤"을 "정답"으로 착각할 수 있음 → 반드시 아래 닻으로 판결</text>
+  <text x="500" y="540" fill="#7e93a6" font-size="11" text-anchor="middle">역할 교대: 다음 세대엔 B가 제안+검증 생성, A가 해결</text>
+
+  <path d="M500,584 L500,616" stroke="#e0a23a" stroke-width="2" marker-end="url(#arrAmber)"/>
+
+  <!-- ===================== BAND 3: OBJECTIVE ANCHOR (HERO) ===================== -->
+  <text x="50" y="638" fill="#e0a23a" font-size="13" font-weight="700">③ 객관적 닻 — 판결은 모델이 아니라 실행이 한다 ★ 전체 구조의 하중점</text>
+  <rect x="50" y="650" width="900" height="150" rx="11" fill="#1c1709" stroke="#9a7a2a" stroke-width="1.8"/>
+
+  <rect x="74" y="672" width="406" height="106" rx="8" fill="#241d0d" stroke="#7a6326" stroke-width="1.2"/>
+  <text x="92" y="698" fill="#f0b850" font-size="14" font-weight="700">실행 검증기 (격리 샌드박스)</text>
+  <text x="92" y="722" fill="#d9c79a" font-size="11.5">· 검증 스크립트 / 단위테스트 / 목적함수 실행</text>
+  <text x="92" y="742" fill="#d9c79a" font-size="11.5">· 별도 프로세스 — 후보가 채점 결과 변조 불가</text>
+  <text x="92" y="762" fill="#b59550" font-size="11">· generator-verifier 격차를 적대적으로 감사</text>
+
+  <rect x="520" y="672" width="406" height="106" rx="8" fill="#241d0d" stroke="#7a6326" stroke-width="1.2"/>
+  <text x="538" y="698" fill="#f0b850" font-size="14" font-weight="700">ground-truth 앵커 (1~10%)</text>
+  <text x="538" y="722" fill="#d9c79a" font-size="11.5">· 정답이 알려진 문제를 섞어 상시 감사</text>
+  <text x="538" y="742" fill="#d9c79a" font-size="11.5">· 앵커 점수 하락 = Goodhart 붕괴 조기 신호</text>
+  <text x="538" y="762" fill="#b59550" font-size="11">· 후기 붕괴(보상↑ 정확도↓) 차단</text>
+
+  <path d="M500,800 L500,832" stroke="#e0a23a" stroke-width="2" marker-end="url(#arrAmber)"/>
+
+  <!-- ===================== BAND 4: DOUBLE EVAL GATE ===================== -->
+  <text x="50" y="854" fill="#e07a8a" font-size="13" font-weight="700">④ 이중 평가 게이트 — 노이즈를 push하지 않기 위해</text>
+  <rect x="50" y="866" width="900" height="116" rx="10" fill="#1c1116" stroke="#5a2f3a" stroke-width="1"/>
+
+  <rect x="72" y="888" width="206" height="74" rx="8" fill="#251218" stroke="#7a3340" stroke-width="1.1"/>
+  <text x="88" y="912" fill="#e8909c" font-size="12.5" font-weight="700">노이즈 플로어</text>
+  <text x="88" y="932" fill="#c9aab0" font-size="10.5">σ 먼저 측정 →</text>
+  <text x="88" y="948" fill="#c9aab0" font-size="10.5">신호/잡음 분해능 확인</text>
+
+  <rect x="294" y="888" width="206" height="74" rx="8" fill="#251218" stroke="#7a3340" stroke-width="1.1"/>
+  <text x="310" y="912" fill="#e8909c" font-size="12.5" font-weight="700">싼 스크린</text>
+  <text x="310" y="932" fill="#c9aab0" font-size="10.5">dev 1회 + 회귀 게이트</text>
+  <text x="310" y="948" fill="#c9aab0" font-size="10.5">successive halving</text>
+
+  <rect x="516" y="888" width="206" height="74" rx="8" fill="#251218" stroke="#7a3340" stroke-width="1.1"/>
+  <text x="532" y="912" fill="#e8909c" font-size="12.5" font-weight="700">paired 확인</text>
+  <text x="532" y="932" fill="#c9aab0" font-size="10.5">holdout K회 재평가</text>
+  <text x="532" y="948" fill="#c9aab0" font-size="10.5">CI 하한 &gt; 부모일 때만</text>
+
+  <rect x="738" y="888" width="190" height="74" rx="8" fill="#251218" stroke="#7a3340" stroke-width="1.1"/>
+  <text x="754" y="912" fill="#e8909c" font-size="12.5" font-weight="700">lexicographic</text>
+  <text x="754" y="932" fill="#c9aab0" font-size="10.5">정답=하드 게이트</text>
+  <text x="754" y="948" fill="#c9aab0" font-size="10.5">효율은 그 다음</text>
+
+  <path d="M500,982 L500,1012" stroke="#8aa0b8" stroke-width="1.8" marker-end="url(#arr)"/>
+
+  <!-- ===================== DECISION ===================== -->
+  <polygon points="500,1012 560,1052 500,1092 440,1052" fill="#182230" stroke="#56708a" stroke-width="1.5"/>
+  <text x="500" y="1058" fill="#dfe7ef" font-size="15" font-weight="700" text-anchor="middle">통과?</text>
+
+  <!-- YES path -->
+  <path d="M560,1052 L724,1052" stroke="#5bb08a" stroke-width="1.8" marker-end="url(#arrGreen)"/>
+  <text x="600" y="1042" fill="#5bb08a" font-size="12" font-weight="700">YES</text>
+  <rect x="726" y="1018" width="206" height="70" rx="9" fill="#0f2018" stroke="#3a7d5f" stroke-width="1.4"/>
+  <text x="742" y="1044" fill="#7fd8a8" font-size="13" font-weight="700">자기 업그레이드</text>
+  <text x="742" y="1066" fill="#bfe0cd" font-size="11">+ Git commit / push</text>
+  <text x="742" y="1082" fill="#7e93a6" font-size="10">변경분이 다음 세대로 유전</text>
+
+  <!-- NO path -->
+  <path d="M440,1052 L276,1052" stroke="#8aa0b8" stroke-width="1.8" marker-end="url(#arr)"/>
+  <text x="360" y="1042" fill="#8aa0b8" font-size="12" font-weight="700">NO</text>
+  <rect x="68" y="1018" width="206" height="70" rx="9" fill="#1a1c22" stroke="#46566a" stroke-width="1.3"/>
+  <text x="84" y="1044" fill="#c2ccd8" font-size="13" font-weight="700">archive에 보존</text>
+  <text x="84" y="1066" fill="#9fb3c4" font-size="11">실패도 버리지 않음</text>
+  <text x="84" y="1082" fill="#7e93a6" font-size="10">나중의 도약 발판(stepping stone)</text>
+
+  <!-- ===================== BAND 5: GIT GENOME ===================== -->
+  <path d="M829,1088 L829,1126" stroke="#5bb08a" stroke-width="1.8" marker-end="url(#arrGreen)"/>
+  <text x="50" y="1150" fill="#5bb08a" font-size="13" font-weight="700">⑤ Git 게놈 기질 — 코드가 곧 유전체</text>
+  <rect x="50" y="1162" width="900" height="120" rx="10" fill="#101c16" stroke="#2c4a3b" stroke-width="1"/>
+
+  <rect x="72" y="1184" width="270" height="78" rx="8" fill="#0e2018" stroke="#3a7d5f" stroke-width="1.1"/>
+  <text x="88" y="1210" fill="#7fd8a8" font-size="13" font-weight="700">archive 트리</text>
+  <text x="88" y="1232" fill="#b6cbc0" font-size="11">git log = 성능 곡선</text>
+  <text x="88" y="1250" fill="#b6cbc0" font-size="11">브랜치 = 병렬 탐색 population</text>
+
+  <rect x="364" y="1184" width="270" height="78" rx="8" fill="#0e2018" stroke="#3a7d5f" stroke-width="1.1"/>
+  <text x="380" y="1210" fill="#7fd8a8" font-size="13" font-weight="700">다양성 샘플링</text>
+  <text x="380" y="1232" fill="#b6cbc0" font-size="11">best만 고르지 않음</text>
+  <text x="380" y="1250" fill="#b6cbc0" font-size="11">local optimum 탈출</text>
+
+  <rect x="656" y="1184" width="272" height="78" rx="8" fill="#0e2018" stroke="#3a7d5f" stroke-width="1.1"/>
+  <text x="672" y="1210" fill="#7fd8a8" font-size="13" font-weight="700">push / pull</text>
+  <text x="672" y="1232" fill="#b6cbc0" font-size="11">승급 = push, 회귀 시 revert</text>
+  <text x="672" y="1250" fill="#b6cbc0" font-size="11">runner/benchmarks = read-only</text>
+
+  <!-- ===================== LOOP BACK ===================== -->
+  <path d="M50,1222 L24,1222 L24,200 L48,200" fill="none" stroke="#7d6bd0" stroke-width="2" marker-end="url(#arrLoop)"/>
+  <text x="34" y="715" fill="#7d6bd0" font-size="12" font-weight="700" transform="rotate(-90 34 715)" text-anchor="middle">역할 교대 · 다음 세대 · 새 문제 인스턴스</text>
+
+  <!-- ===================== FOOTNOTE ===================== -->
+  <line x1="50" y1="1316" x2="950" y2="1316" stroke="#22303d" stroke-width="1"/>
+  <text x="50" y="1346" fill="#6b8298" font-size="12" font-weight="700">막는 위협 (좌→우 흐름에 매핑)</text>
+  <text x="50" y="1372" fill="#7fd8c0" font-size="11.5">▪ 절차적 생성 → 정답 암기 차단</text>
+  <text x="50" y="1392" fill="#aeb9ff" font-size="11.5">▪ 검증기 생성(모델이 판단 X) → 합의=진실 붕괴 차단</text>
+  <text x="50" y="1412" fill="#f0b850" font-size="11.5">▪ 실행 판결 + 앵커 → 설득력 있는 거짓 / Goodhart 차단</text>
+  <text x="520" y="1372" fill="#e8909c" font-size="11.5">▪ 이중 평가 → 노이즈를 개선으로 착각하는 것 차단</text>
+  <text x="520" y="1392" fill="#7fd8a8" font-size="11.5">▪ archive 다양성 → local optimum / greedy 붕괴 차단</text>
+  <text x="520" y="1412" fill="#9fb3c4" font-size="11.5">▪ 프로세스 격리 → 채점 결과 런타임 변조 차단</text>
+
+  <text x="50" y="1452" fill="#5a6b7d" font-size="11">한계: 비검증 영역은 객관적 닻이 없어 이 루프가 깨끗하게 작동하지 않음 — 분야 전체의 미해결 지점. 자동 루프엔 검증 비대칭이 큰 도메인부터.</text>
+</svg>
