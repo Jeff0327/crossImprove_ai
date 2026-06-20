@@ -9,6 +9,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Status: skeleton](https://img.shields.io/badge/status-skeleton-orange.svg)](#status--%ED%98%84%EC%9E%AC-%EC%83%81%ED%83%9C)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing--%EA%B8%B0%EC%97%AC)
+[![tests](https://github.com/Jeff0327/crossImprove_ai/actions/workflows/tests.yml/badge.svg)](https://github.com/Jeff0327/crossImprove_ai/actions/workflows/tests.yml)
 
 </div>
 
