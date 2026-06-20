@@ -1,19 +1,20 @@
 """
 runner/sandbox.py  —  THE JUDGE. The loop must NOT edit this file.
 
-Runs a verifier's check() against a solution in a SEPARATE process. Phase 3
-hardening addresses review findings C1/C2/C3:
+Runs a verifier's check() against a solution in a SEPARATE process. Hardening
+addresses review findings C1/C2/C3:
 
   * C3 — the verdict is returned over a DEDICATED result file, not stdout, so a
          verifier that prints fake JSON cannot spoof the result.
-  * C2 — the child runs in its own session (start_new_session) so the whole
-         process group can be cleaned up; grandchildren can't leak silently.
-  * C1 — POSIX rlimits (CPU, address space, file size, NPROC) + a stripped
-         environment + isolated mode (-I) are applied before exec. This is real
-         but PARTIAL: it does NOT sandbox the filesystem or network. For untrusted
-         self-generated code you STILL must run inside a container with no host
-         mounts and egress disabled. require_hardening=True fails CLOSED where
-         rlimits are unavailable (e.g. Windows) instead of pretending.
+  * C2 — the child runs in its own session/process group; on timeout the ENTIRE
+         group is SIGKILLed (os.killpg), so grandchildren the verifier spawned do
+         not leak. (Previously start_new_session created the group but nothing
+         killed it — fixed.)
+  * C1 — POSIX rlimits (CPU, address space, file size, NPROC) + a stripped env +
+         isolated mode (-I) are applied before exec. Real but PARTIAL: it does NOT
+         sandbox the filesystem or network. For untrusted self-generated code you
+         STILL must run inside a container with no host mounts and egress off.
+         require_hardening=True fails CLOSED where rlimits are unavailable.
 
 A subprocess + rlimits bounds runaway resource use; it is NOT a complete boundary
 against a determined adversary. Containerize for untrusted code.
@@ -23,6 +24,7 @@ import subprocess
 import sys
 import os
 import json
+import signal
 import tempfile
 import textwrap
 
@@ -33,7 +35,8 @@ except ImportError:  # pragma: no cover - Windows
     resource = None
     _HAVE_RLIMIT = False
 
-# harness writes its verdict to RESULT_FD_PATH, never to stdout.
+_POSIX = os.name == "posix"
+
 _HARNESS = textwrap.dedent('''
     import json, os
     _verifier_src = {verifier_src!r}
@@ -52,7 +55,7 @@ _HARNESS = textwrap.dedent('''
 
 
 def _limits(cpu_seconds: int, mem_bytes: int):
-    def _apply():  # runs in the child after fork, before exec
+    def _apply():  # child, after fork, before exec
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
         resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
         resource.setrlimit(resource.RLIMIT_FSIZE, (10 * 1024 * 1024,) * 2)
@@ -61,6 +64,17 @@ def _limits(cpu_seconds: int, mem_bytes: int):
         except (ValueError, OSError):
             pass
     return _apply
+
+
+def _kill_group(proc) -> None:
+    """SIGKILL the child's whole process group so grandchildren don't leak (C2)."""
+    try:
+        if _POSIX:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        else:  # pragma: no cover
+            proc.kill()
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
 
 
 def verify(verifier_src: str, solution: str, timeout: float = 5.0,
@@ -77,17 +91,28 @@ def verify(verifier_src: str, solution: str, timeout: float = 5.0,
         f.write(_HARNESS.format(verifier_src=verifier_src, solution=solution))
 
     env = {"PATH": "/usr/bin:/bin", "RESULT_FD_PATH": res_path}  # stripped env
-    kwargs = dict(capture_output=True, text=True, timeout=timeout, env=env, cwd=workdir)
+    popen_kw = dict(stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    env=env, cwd=workdir)
     if _HAVE_RLIMIT:
-        kwargs["preexec_fn"] = _limits(int(timeout) + 1, mem_bytes)
-        kwargs["start_new_session"] = True
+        popen_kw["preexec_fn"] = _limits(int(timeout) + 1, mem_bytes)
+    if _POSIX:
+        popen_kw["start_new_session"] = True  # own process group
 
     proc = None
     try:
-        proc = subprocess.run([sys.executable, "-I", src_path], **kwargs)
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "timeout"}
+        proc = subprocess.Popen([sys.executable, "-I", src_path], **popen_kw)
+        try:
+            _, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_group(proc)                # C2: reap the whole group
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            return {"ok": False, "error": "timeout"}
     except Exception as e:  # noqa: BLE001
+        if proc is not None:
+            _kill_group(proc)
         return {"ok": False, "error": repr(e)}
     finally:
         try:
@@ -101,8 +126,7 @@ def verify(verifier_src: str, solution: str, timeout: float = 5.0,
             verdict = json.loads(f.read())
     except (OSError, json.JSONDecodeError):
         rc = getattr(proc, "returncode", "?")
-        err = (getattr(proc, "stderr", "") or "")[:200]
-        verdict = {"ok": False, "error": f"no result (rc={rc}); stderr={err}"}
+        verdict = {"ok": False, "error": f"no result (rc={rc}); stderr={(stderr or '')[:200]}"}
     finally:
         try:
             if os.path.exists(res_path):

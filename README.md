@@ -147,11 +147,11 @@ docs/         architecture diagram
 
 ## Status · 현재 상태
 
-**Integrated skeleton.** The full loop runs end-to-end without an LLM (ToyMutator): archive + softmax diversity sampling, real measured paired scores feeding the gate, role-swap via a unified `Agent`, and rc-checked commits that refuse empty (fake) promotions. The sandbox applies POSIX rlimits + a stripped env + an fd-based verdict channel (anti-spoof). 46 tests cover all of it.
+**Integrated skeleton.** The full loop runs end-to-end without an LLM (ToyMutator): archive + softmax diversity sampling, real measured paired scores feeding the gate, role-swap via a unified `Agent`, and rc-checked commits that refuse empty (fake) promotions. The sandbox applies POSIX rlimits + a stripped env + an fd-based verdict channel (anti-spoof).  49 tests cover all of it.
 
 **One remaining seam:** genuine capability gain requires `LLMMutator` rewriting agent code on a real domain — it fails closed until wired. The sandbox hardening is **real but partial**: it does NOT isolate filesystem or network. **Run untrusted self-generated code only inside a container (no host mounts, egress off);** a subprocess + rlimits is not a complete boundary.
 
-**통합된 골격.** 전체 루프가 LLM 없이 끝까지 돈다(ToyMutator): 아카이브 + softmax 다양성 샘플링, 실측 paired 점수의 게이트 연결, 통합 `Agent`를 통한 역할 교대, 빈(가짜) 승급을 거부하는 반환코드 검사 커밋. 샌드박스는 POSIX rlimit + env strip + fd 기반 판결 채널(스푸핑 방지)을 적용한다. 46개 테스트가 이 전부를 덮는다.
+**통합된 골격.** 전체 루프가 LLM 없이 끝까지 돈다(ToyMutator): 아카이브 + softmax 다양성 샘플링, 실측 paired 점수의 게이트 연결, 통합 `Agent`를 통한 역할 교대, 빈(가짜) 승급을 거부하는 반환코드 검사 커밋. 샌드박스는 POSIX rlimit + env strip + fd 기반 판결 채널(스푸핑 방지)을 적용한다. 49개 테스트가 이 전부를 덮는다.
 
 **남은 seam 하나:** 진짜 능력 향상은 `LLMMutator`가 실제 도메인에서 agent 코드를 재작성해야 하며, 연결 전까지 fail-closed다. 샌드박스 강화는 **실재하지만 부분적**이다 — 파일시스템·네트워크는 격리하지 않는다. **자가 생성 코드는 컨테이너 안(호스트 마운트 없음, egress 차단)에서만 돌려라.**
 
@@ -172,15 +172,15 @@ Issues and PRs welcome. Good first directions: wire a local-LLM client into `age
 
 ```bash
 pip install pytest
-pytest -q          # 46 behavioral tests, stdlib only, no LLM/network
+pytest -q          # 49 behavioral tests, stdlib only, no LLM/network
 ```
 
-The suite checks design intent, not just imports: procedural freshness, execution
+The 49-test suite checks design intent, not just imports: procedural freshness, execution
 verdict under hostile verifiers, generator-verifier gap audit, the gate refusing
 noise and refusing promotion when anchors regress (Goodhart guard), bounded debate,
 a full mock-LLM generation, and fail-closed stubs. CI runs them on Python 3.10–3.12.
 
-이 스위트(46개)는 임포트가 아니라 *설계 의도*를 검증한다: 절차적 생성의 신선도, 적대적
+이 스위트(49개)는 임포트가 아니라 *설계 의도*를 검증한다: 절차적 생성의 신선도, 적대적
 검증기 하에서의 실행 판결, generator-verifier 격차 감사, 노이즈 거부 및 앵커 퇴화 시
 승급 거부(Goodhart 가드), 경계가 있는 토론, mock-LLM 전체 세대, fail-closed 스텁.
 CI는 Python 3.10–3.12에서 실행한다.

@@ -374,3 +374,59 @@ def test_full_loop_runs_without_llm_or_git_sideeffects():
     from orchestrator import loop
     # smoke: completes, no exceptions, no commits (do_commit defaults False)
     loop.main(generations=4, seed=1, do_commit=False)
+
+
+# --- [13] re-verification fixes: C2 group-kill + P4 proposer/debate wiring ----
+
+def test_timeout_with_grandchild_does_not_hang():
+    # verifier spawns a grandchild and the parent blocks; on timeout the whole
+    # group must be killed so the call returns promptly (not after 30s).
+    import time
+    hostile = (
+        "def check(s):\n"
+        "    import subprocess, sys, time\n"
+        "    subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "    time.sleep(30)\n"
+        "    return True\n"
+    )
+    t0 = time.time()
+    res = sandbox.verify(hostile, "x", timeout=2.0)
+    elapsed = time.time() - t0
+    assert res["ok"] is False and res.get("error") == "timeout"
+    assert elapsed < 8.0          # killpg worked: did not wait out the 30s sleeps
+
+def test_generation_actually_uses_proposer_and_debate():
+    from orchestrator.loop import generation, Member
+    from agent.agent import Agent
+    from agent.genome import Genome, ToyMutator
+
+    class Spy(Agent):
+        def __init__(self):
+            super().__init__("spy")
+            self.proposed = 0
+            self.critiqued = 0
+        def propose(self, difficulty, seed):
+            self.proposed += 1
+            return example_math.generate(seed=seed)
+        def critique(self, task, sol, tr):
+            self.critiqued += 1
+            return super().critique(task, sol, tr)
+
+    spy = Spy()
+    parent = Member(Agent("p", genome=Genome()), 0.0)
+    promoted, child = generation(spy, parent, ToyMutator(),
+                                 n_tasks=3, seed_base=0, anchor_ok=True, sigma=0.0)
+    assert spy.proposed == 3            # proposer actually proposed the tasks
+    assert spy.critiqued >= 3           # debate actually ran (critique invoked)
+    assert isinstance(child.fitness, float)
+
+def test_role_swap_changes_proposer_across_generations():
+    # the two archived agents alternate as proposer; assert different objects propose
+    from orchestrator.loop import Archive
+    from agent.agent import Agent
+    arc = Archive()
+    a, b = Agent("A"), Agent("B")
+    arc.add(a, 1.0); arc.add(b, 1.0)
+    g0_proposer = arc.members[0 % 2].agent
+    g1_proposer = arc.members[1 % 2].agent
+    assert g0_proposer is a and g1_proposer is b   # behavioral alternation

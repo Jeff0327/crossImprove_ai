@@ -18,7 +18,7 @@ Behavior is driven by two things:
 from __future__ import annotations
 import re
 from agent.types import Task
-from agent.genome import Genome
+from agent.genome import Genome, Mutator
 
 
 class Agent:
@@ -72,7 +72,7 @@ class Agent:
 
     # ---- self-improvement seam --------------------------------------------
 
-    def self_improve(self, mutator) -> "Agent":
+    def self_improve(self, mutator: Mutator) -> "Agent":
         """
         Produce a child agent with a mutated genome. This is the single seam where
         real evolution happens: a real Mutator asks the LLM to rewrite agent code;

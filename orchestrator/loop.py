@@ -29,9 +29,18 @@ from dataclasses import dataclass, field
 
 from agent.agent import Agent
 from agent.genome import Genome, ToyMutator
+from agent.debate import run_debate
 from agent.types import Task
 from runner import verifier, gate
 from benchmarks.procedural import example_math
+
+
+# ---- tunable config (one place to adjust the loop) --------------------------
+
+N_FLOOR_TASKS = 10        # baseline runs used to measure the noise floor (sigma)
+N_TASKS_PER_GEN = 8       # held-out tasks the proposer generates each generation
+SAMPLE_TEMPERATURE = 0.5  # softmax temperature for diversity sampling (>0)
+DEBATE_MAX_ROUNDS = 4     # hard cap on objection/rebuttal rounds
 
 
 # ---- archive ----------------------------------------------------------------
@@ -48,7 +57,7 @@ class Archive:
     def add(self, agent: Agent, fitness: float) -> None:
         self.members.append(Member(agent, fitness))
 
-    def sample(self, rng: random.Random, temperature: float = 0.5) -> Member:
+    def sample(self, rng: random.Random, temperature: float = SAMPLE_TEMPERATURE) -> Member:
         """
         Softmax sampling over fitness — diversity, NOT greedy-best (D2). Every
         member keeps a non-zero probability; better ones are likelier. This is the
@@ -64,9 +73,25 @@ class Archive:
 
 # ---- measurement (real scores feed the gate, no hardcoding) -----------------
 
+def _verdict(task: Task, solution: str) -> bool:
+    return verifier.judge(task, solution).ok
+
+def solve_with_debate(proposer: Agent, solver: Agent, task: Task,
+                      max_rounds: int = DEBATE_MAX_ROUNDS) -> str:
+    """Solver answers; debate (with the proposer critiquing) refines before judging."""
+    sol = solver.solve(task)
+    sol, _ = run_debate(proposer, solver, task, sol, max_rounds=max_rounds,
+                        judge=lambda t, s: _verdict(t, s))
+    return sol
+
 def measure(agent: Agent, tasks: list[Task]) -> list[float]:
-    """Per-task 1.0/0.0 verdicts via execution. The list IS the paired sample."""
-    return [1.0 if verifier.judge(t, agent.solve(t)).ok else 0.0 for t in tasks]
+    """Per-task 1.0/0.0 verdicts via execution (no debate). Used for the baseline."""
+    return [1.0 if _verdict(t, agent.solve(t)) else 0.0 for t in tasks]
+
+def measure_vs(proposer: Agent, solver: Agent, tasks: list[Task]) -> list[float]:
+    """Paired sample for the gate: solver answers each task WITH debate, then judged."""
+    return [1.0 if _verdict(t, solve_with_debate(proposer, solver, t)) else 0.0
+            for t in tasks]
 
 
 # ---- git substrate (return codes checked; empty commits refused) ------------
@@ -98,14 +123,20 @@ def apply_and_commit(genome: Genome, message: str, *, path=None, cwd=None,
 # ---- one generation ---------------------------------------------------------
 
 def generation(proposer: Agent, parent: Member, mutator, *,
-               tasks: list[Task], anchor_ok: bool, sigma: float) -> tuple[bool, Member]:
-    # child = a real mutation of the parent's genome (the self-improvement seam)
+               n_tasks: int, seed_base: int, anchor_ok: bool,
+               sigma: float) -> tuple[bool, Member]:
+    # ① the PROPOSER actually proposes the held-out tasks (role-swap is behavioral)
+    tasks = [proposer.propose(difficulty=1.0, seed=seed_base + i) for i in range(n_tasks)]
+
+    # ② child = a real mutation of the parent's genome (the self-improvement seam)
     child = parent.agent.self_improve(mutator)
 
-    # MEASURE both on the SAME held-out tasks → real paired samples (no hardcoding)
-    parent_runs = measure(parent.agent, tasks)
-    child_runs = measure(child, tasks)
-    child_fit, parent_fit = sum(child_runs) / len(tasks), sum(parent_runs) / len(tasks)
+    # ③ MEASURE both on the SAME tasks, each refined through DEBATE, then judged by
+    #    execution → real paired samples feed the gate (no hardcoding)
+    parent_runs = measure_vs(proposer, parent.agent, tasks)
+    child_runs = measure_vs(proposer, child, tasks)
+    child_fit = sum(child_runs) / len(tasks)
+    parent_fit = sum(parent_runs) / len(tasks)
 
     promote = gate.should_promote(
         gate.Score(correct=child_fit, efficiency=0.0),
@@ -125,7 +156,7 @@ def main(generations: int = 6, seed: int = 0, do_commit: bool = False) -> None:
 
     # noise floor measured ONCE on the baseline before optimizing (sigma)
     baseline = Agent("baseline", genome=Genome())
-    floor_tasks = [example_math.generate(seed=1000 + i) for i in range(10)]
+    floor_tasks = [example_math.generate(seed=1000 + i) for i in range(N_FLOOR_TASKS)]
     sigma = gate.noise_floor([sum(measure(baseline, [t])) for t in floor_tasks])
 
     archive = Archive()
@@ -135,12 +166,13 @@ def main(generations: int = 6, seed: int = 0, do_commit: bool = False) -> None:
 
     for g in range(generations):
         # ROLE SWAP: the two archived agents trade proposer/solver each generation
+        # ROLE SWAP: the two archived agents alternate who proposes each generation
         proposer = archive.members[g % 2].agent
         parent = archive.sample(rng)                      # diversity sampling
-        tasks = [example_math.generate(seed=g * 100 + i) for i in range(8)]
 
         promoted, child = generation(proposer, parent, mutator,
-                                     tasks=tasks, anchor_ok=True, sigma=sigma)
+                                     n_tasks=N_TASKS_PER_GEN, seed_base=g * 100,
+                                     anchor_ok=True, sigma=sigma)
         if promoted:
             archive.add(child.agent, child.fitness)
             if do_commit:
