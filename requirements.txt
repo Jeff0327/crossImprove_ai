@@ -1,6 +1,8 @@
-# Wire to your own local LLM endpoint (vLLM / Ollama / OpenAI-compatible).
-# Kept dependency-light on purpose; the skeleton runs on the stdlib.
-# Uncomment what you use:
+# Runtime: wire to your own local LLM endpoint (vLLM / Ollama / OpenAI-compatible).
+# The skeleton itself runs on the stdlib. Uncomment what you use:
 # requests>=2.31
 # numpy>=1.26        # paired stats / noise floor
 # scipy>=1.11        # bootstrap CI, McNemar
+
+# Dev / test:
+pytest>=8.0

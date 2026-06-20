@@ -162,6 +162,23 @@ Skeleton. `agent/` LLM calls are stubs marked `# TODO(llm)` — wire to a local 
 
 Issues and PRs welcome. Good first directions: wire a local-LLM client into `agent/*`; add procedural generators under `benchmarks/procedural/`; implement bootstrap CIs / McNemar in `runner/gate.py`; harden `runner/sandbox.py`. <br>이슈·PR 환영. 시작점: `agent/*`에 로컬 LLM 연결, `benchmarks/procedural/`에 생성기 추가, `runner/gate.py`에 bootstrap CI/McNemar 구현, `runner/sandbox.py` 강화.
 
+## Tests · 테스트
+
+```bash
+pip install pytest
+pytest -q          # 27 behavioral tests, stdlib only, no LLM/network
+```
+
+The suite checks design intent, not just imports: procedural freshness, execution
+verdict under hostile verifiers, generator-verifier gap audit, the gate refusing
+noise and refusing promotion when anchors regress (Goodhart guard), bounded debate,
+a full mock-LLM generation, and fail-closed stubs. CI runs them on Python 3.10–3.12.
+
+이 스위트는 임포트가 아니라 *설계 의도*를 검증한다: 절차적 생성의 신선도, 적대적
+검증기 하에서의 실행 판결, generator-verifier 격차 감사, 노이즈 거부 및 앵커 퇴화 시
+승급 거부(Goodhart 가드), 경계가 있는 토론, mock-LLM 전체 세대, fail-closed 스텁.
+CI는 Python 3.10–3.12에서 실행한다.
+
 ## License · 라이선스
 
 MIT — see [LICENSE](LICENSE).
