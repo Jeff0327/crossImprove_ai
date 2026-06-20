@@ -9,7 +9,7 @@ upcoming "improvements" may be exploits.
 """
 from __future__ import annotations
 from dataclasses import dataclass
-from agent.proposer import Task
+from agent.types import Task
 from runner import sandbox
 
 

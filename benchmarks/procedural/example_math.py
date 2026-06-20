@@ -9,7 +9,7 @@ specific math. Swap in algorithm/optimization/coding generators the same way.
 """
 from __future__ import annotations
 import random
-from agent.proposer import Task
+from agent.types import Task
 
 
 def generate(difficulty: float = 1.0, seed: int | None = None) -> Task:

@@ -9,3 +9,4 @@ venv/
 runs/
 *.sqlite
 .DS_Store
+agent/genome.json

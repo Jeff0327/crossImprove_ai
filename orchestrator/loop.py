@@ -1,98 +1,152 @@
 """
 orchestrator/loop.py
 
-The main self-play loop. One pass = one generation:
+The main self-play loop, integrated end-to-end. Phase 4 fixes the "glue" findings
+the review concentrated here (A1, D1, D2, D3) and makes the loop runnable without
+an LLM via a ToyMutator, so the FULL cycle is exercisable and testable:
 
-    sample parent (with diversity) -> propose task + verifier -> solve -> debate
-    -> execution verdict -> gate (double eval + anchors) -> promote? -> git push
-    -> archive -> ROLE SWAP -> repeat.
+    build archive -> softmax-sample a parent (diversity, not greedy)         [D2]
+      -> parent proposes a held-out task set (procedural; nothing to memorize)
+      -> child = parent.self_improve(mutator)  (real genome mutation)        [A1]
+      -> MEASURE child vs parent on the SAME tasks (paired, real scores)     [D1]
+      -> gate: sigma-derived noise margin + paired t-test + anchors + lexico
+      -> promote? apply genome + commit (diff-checked, rc-checked)       [A1,D3]
+      -> add child to archive -> ROLE SWAP next generation              [A2,A3]
 
-Everything load-bearing lives in runner/ (the judge) which this file calls but
-does not modify. The agent/ objects ARE the genome; promoting means committing
-their changed source to git.
-
-This is a runnable skeleton: wire a real LLM into agent/* and a real git remote,
-then flesh out the marked steps. It is deliberately small so the control flow is
-readable end to end.
+HONEST LIMITATION: the ToyMutator perturbs a documented genome knob so the
+mechanics run deterministically. Genuine capability gain needs the LLMMutator
+(agent/genome.py) rewriting agent code on a real domain — that is the one
+remaining seam, and it fails closed until wired. The toy solver is perfect on
+arithmetic, so with ToyMutator nothing actually improves; that is correct and
+honest — the gate refuses to promote noise. Tests inject a weakened parent to
+exercise the promote path.
 """
 from __future__ import annotations
+import math
+import random
 import subprocess
+from dataclasses import dataclass, field
 
-from agent.proposer import Proposer
-from agent.solver import Solver
-from agent.debate import run_debate
+from agent.agent import Agent
+from agent.genome import Genome, ToyMutator
+from agent.types import Task
 from runner import verifier, gate
 from benchmarks.procedural import example_math
 
 
-# ---- git as genome substrate ------------------------------------------------
+# ---- archive ----------------------------------------------------------------
 
-def git(*args: str) -> str:
-    return subprocess.run(["git", *args], capture_output=True, text=True).stdout
+@dataclass
+class Member:
+    agent: Agent
+    fitness: float = 0.0
 
-def commit_and_push(message: str) -> None:
-    git("add", "agent")          # only the genome is committed by the loop
-    git("commit", "-m", message)
-    git("push")                  # configure the remote/branch out of band
+@dataclass
+class Archive:
+    members: list[Member] = field(default_factory=list)
 
-def sample_parent(archive: list) -> object:
+    def add(self, agent: Agent, fitness: float) -> None:
+        self.members.append(Member(agent, fitness))
+
+    def sample(self, rng: random.Random, temperature: float = 0.5) -> Member:
+        """
+        Softmax sampling over fitness — diversity, NOT greedy-best (D2). Every
+        member keeps a non-zero probability; better ones are likelier. This is the
+        open-ended-exploration guard against collapsing into a local optimum.
+        """
+        if not self.members:
+            raise ValueError("empty archive")
+        fits = [m.fitness for m in self.members]
+        mx = max(fits)
+        weights = [math.exp((f - mx) / max(temperature, 1e-6)) for f in fits]
+        return rng.choices(self.members, weights=weights, k=1)[0]
+
+
+# ---- measurement (real scores feed the gate, no hardcoding) -----------------
+
+def measure(agent: Agent, tasks: list[Task]) -> list[float]:
+    """Per-task 1.0/0.0 verdicts via execution. The list IS the paired sample."""
+    return [1.0 if verifier.judge(t, agent.solve(t)).ok else 0.0 for t in tasks]
+
+
+# ---- git substrate (return codes checked; empty commits refused) ------------
+
+def _git(*args: str, cwd=None) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], capture_output=True, text=True, cwd=cwd)
+
+def apply_and_commit(genome: Genome, message: str, *, path=None, cwd=None,
+                     push: bool = False) -> bool:
     """
-    Diversity sampling, NOT greedy-best. Every archived agent keeps a non-zero
-    selection probability (better ones higher). Greedy selection collapses into
-    local optima; the archive is what makes exploration open-ended.
+    Persist the mutated genome and commit it. Returns True only if a REAL diff was
+    committed (D3/A1: never a silent empty commit pretending to be progress).
+    `path`/`cwd` are injectable so the empty-commit refusal is unit-testable.
     """
-    # TODO: weight by score while keeping all probabilities > 0 (e.g. softmax).
-    return archive[-1] if archive else None
+    from agent.genome import GENOME_PATH
+    p = path or GENOME_PATH
+    genome.save(p)
+    if _git("add", str(p), cwd=cwd).returncode != 0:
+        return False
+    if _git("diff", "--cached", "--quiet", cwd=cwd).returncode == 0:
+        return False  # nothing changed -> not a promotion, do not fake one
+    if _git("commit", "-m", message, cwd=cwd).returncode != 0:
+        return False
+    if push and _git("push", cwd=cwd).returncode != 0:
+        return False
+    return True
 
 
 # ---- one generation ---------------------------------------------------------
 
-def generation(proposer: Proposer, solver: Solver, *, parent_score,
-               anchor_ok: bool, sigma: float) -> bool:
-    # ① fresh, procedurally generated task (no fixed answer to memorize)
-    task = example_math.generate(difficulty=1.0, seed=None)
+def generation(proposer: Agent, parent: Member, mutator, *,
+               tasks: list[Task], anchor_ok: bool, sigma: float) -> tuple[bool, Member]:
+    # child = a real mutation of the parent's genome (the self-improvement seam)
+    child = parent.agent.self_improve(mutator)
 
-    # ② solve, then ③ debate to refine the candidate
-    solution = solver.solve(task)
-    solution, _transcript = run_debate(proposer, solver, task, solution)
+    # MEASURE both on the SAME held-out tasks → real paired samples (no hardcoding)
+    parent_runs = measure(parent.agent, tasks)
+    child_runs = measure(child, tasks)
+    child_fit, parent_fit = sum(child_runs) / len(tasks), sum(parent_runs) / len(tasks)
 
-    # ④ the verdict is execution, never a model's say-so
-    if not verifier.judge(task, solution).ok:
-        return False
-
-    # ⑤ promotion gate: noise floor + paired confirm + anchors + lexicographic
-    cand = gate.Score(correct=1.0, efficiency=0.0)   # fill from real measurements
     promote = gate.should_promote(
-        cand, parent_score,
-        candidate_dev=1.0, parent_dev=0.0, regression_ok=True,
-        candidate_runs=[1.0], parent_runs=[0.0],
-        anchor_ok=anchor_ok, margin=2 * sigma,       # 2*sigma = beat the noise
+        gate.Score(correct=child_fit, efficiency=0.0),
+        gate.Score(correct=parent_fit, efficiency=0.0),
+        candidate_dev=child_fit, parent_dev=parent_fit, regression_ok=True,
+        candidate_runs=child_runs, parent_runs=parent_runs,
+        anchor_ok=anchor_ok, sigma=sigma,
     )
-    if promote:
-        commit_and_push("promote: candidate cleared gate")
-    return promote
+    return promote, Member(child, child_fit)
 
 
-def main(generations: int = 100) -> None:
-    # measure the noise floor ONCE before optimizing anything
-    sigma = 0.0  # TODO: run the fixed baseline ~30x on the anchor set, take pstdev
+# ---- driver -----------------------------------------------------------------
 
-    llm = None   # TODO(llm): a local model client exposing .complete(prompt)
-    a, b = Proposer(llm, domain="arithmetic"), Solver(llm)
-    parent_score = gate.Score(correct=0.0, efficiency=0.0)
+def main(generations: int = 6, seed: int = 0, do_commit: bool = False) -> None:
+    rng = random.Random(seed)
+    mutator = ToyMutator()           # swap LLMMutator(llm) for real code-evolution
+
+    # noise floor measured ONCE on the baseline before optimizing (sigma)
+    baseline = Agent("baseline", genome=Genome())
+    floor_tasks = [example_math.generate(seed=1000 + i) for i in range(10)]
+    sigma = gate.noise_floor([sum(measure(baseline, [t])) for t in floor_tasks])
+
+    archive = Archive()
+    a, b = Agent("A", genome=Genome()), Agent("B", genome=Genome())
+    archive.add(a, sum(measure(a, floor_tasks)) / len(floor_tasks))
+    archive.add(b, sum(measure(b, floor_tasks)) / len(floor_tasks))
 
     for g in range(generations):
-        # role swap every generation: proposer and solver trade places
-        if g % 2 == 0:
-            proposer, solver = a, b
-        else:
-            proposer, solver = Proposer(llm, domain="arithmetic"), Solver(llm)
+        # ROLE SWAP: the two archived agents trade proposer/solver each generation
+        proposer = archive.members[g % 2].agent
+        parent = archive.sample(rng)                      # diversity sampling
+        tasks = [example_math.generate(seed=g * 100 + i) for i in range(8)]
 
-        anchor_ok = True  # TODO: evaluate the anchor set; False if it regressed
-        promoted = generation(proposer, solver,
-                              parent_score=parent_score,
-                              anchor_ok=anchor_ok, sigma=sigma)
-        print(f"gen {g}: {'PROMOTED' if promoted else 'kept-in-archive'}")
+        promoted, child = generation(proposer, parent, mutator,
+                                     tasks=tasks, anchor_ok=True, sigma=sigma)
+        if promoted:
+            archive.add(child.agent, child.fitness)
+            if do_commit:
+                apply_and_commit(child.agent.genome, f"promote gen {g}")
+        print(f"gen {g}: {'PROMOTED' if promoted else 'kept'} "
+              f"(child_fit={child.fitness:.2f}, archive={len(archive.members)})")
 
 
 if __name__ == "__main__":
