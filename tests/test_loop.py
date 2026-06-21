@@ -480,3 +480,119 @@ def test_loop_main_prints_a_promotion():
     with contextlib.redirect_stdout(buf):
         loop.main(generations=2, seed=0, do_commit=False)
     assert "PROMOTED" in buf.getvalue()
+
+
+# --- [15] re-verification: sandbox verdict-integrity + no temp-dir leak -------
+# These lock in two findings the existing suite missed:
+#   G1  the verdict channel was spoofable (write fake result + os._exit, skipping
+#       the harness's own write). The old anti-spoof test only covered stdout.
+#   G2  the temp workdir leaked on the timeout/exception paths (cleanup lived
+#       only on the normal-return path).
+
+import glob as _glob
+import tempfile as _tempfile
+
+
+def _sbx_dirs():
+    return set(_glob.glob(_os_path_join(_tempfile.gettempdir(), "sbx_*")))
+
+
+def _os_path_join(*a):
+    import os
+    return os.path.join(*a)
+
+
+def test_verdict_spoof_via_osexit_is_rejected():
+    # The exact exploit an optimizer finds first: write a winning verdict to the
+    # result file, then os._exit(0) so the harness never overwrites it. Must be
+    # rejected by the nonce integrity check, NOT accepted as ok=True.
+    spoof = (
+        "def check(s):\n"
+        "    import os, json\n"
+        "    open(os.environ['RESULT_FD_PATH'], 'w').write(json.dumps({'ok': True}))\n"
+        "    os._exit(0)\n"
+        "    return False\n"
+    )
+    res = sandbox.verify(spoof, "x")
+    assert res["ok"] is False
+    assert "integrity" in res.get("error", "")
+
+
+def test_spoof_via_guessed_nonce_field_is_rejected():
+    # Even if the attacker knows the field name (_n) but not the value, a forged
+    # nonce must not pass.
+    spoof = (
+        "def check(s):\n"
+        "    import os, json\n"
+        "    open(os.environ['RESULT_FD_PATH'], 'w').write(json.dumps({'_n': 'deadbeef', 'ok': True}))\n"
+        "    os._exit(0)\n"
+        "    return False\n"
+    )
+    assert sandbox.verify(spoof, "x")["ok"] is False
+
+
+def test_harness_source_unlinked_blocks_nonce_theft():
+    # The harness unlinks its own source on startup, so a verifier cannot read
+    # the real nonce out of sys.argv[0] to forge a passing verdict. If the unlink
+    # defense fails, this verifier would steal the nonce and spoof ok=True.
+    attack = (
+        "def check(s):\n"
+        "    import os, json, re, sys\n"
+        "    nonce = None\n"
+        "    try:\n"
+        "        src = open(sys.argv[0]).read()\n"      # source already gone -> OSError
+        "        m = re.search(r\"_nonce = '([0-9a-f]+)'\", src)\n"
+        "        nonce = m.group(1) if m else None\n"
+        "    except OSError:\n"
+        "        nonce = None\n"
+        "    if nonce:\n"
+        "        open(os.environ['RESULT_FD_PATH'], 'w').write(json.dumps({'_n': nonce, 'ok': True}))\n"
+        "        os._exit(0)\n"
+        "    return False\n"
+    )
+    # nonce theft blocked -> falls through to honest False (a valid, nonce-stamped
+    # verdict), so we get ok=False WITHOUT an integrity error.
+    res = sandbox.verify(attack, "x")
+    assert res["ok"] is False
+    assert "integrity" not in res.get("error", "")
+
+
+def test_prewritten_fake_is_overwritten_when_check_returns_normally():
+    # If check() pre-writes a fake true but then returns normally (no os._exit),
+    # the harness's final write wins -> the real verdict (False) is reported.
+    sneaky = (
+        "def check(s):\n"
+        "    import os, json\n"
+        "    open(os.environ['RESULT_FD_PATH'], 'w').write(json.dumps({'_n': 'x', 'ok': True}))\n"
+        "    return False\n"
+    )
+    assert sandbox.verify(sneaky, "x")["ok"] is False
+
+
+def test_verdict_does_not_leak_internal_nonce_field():
+    # Callers should see a clean {'ok': ...}; the internal integrity token must be
+    # stripped before returning.
+    res = sandbox.verify("def check(s): return s == 'ok'", "ok")
+    assert res["ok"] is True
+    assert "_n" not in res
+
+
+def test_no_tempdir_leak_on_timeout():
+    before = _sbx_dirs()
+    sandbox.verify("def check(s):\n    while True: pass", "x", timeout=1.5)
+    leaked = _sbx_dirs() - before
+    assert leaked == set(), f"leaked temp dirs on timeout: {leaked}"
+
+
+def test_no_tempdir_leak_on_normal_path():
+    before = _sbx_dirs()
+    sandbox.verify("def check(s): return True", "x")
+    leaked = _sbx_dirs() - before
+    assert leaked == set(), f"leaked temp dirs on normal path: {leaked}"
+
+
+def test_no_tempdir_leak_on_exception_path():
+    before = _sbx_dirs()
+    sandbox.verify("def check(s):\n    raise RuntimeError('boom')", "x")
+    leaked = _sbx_dirs() - before
+    assert leaked == set(), f"leaked temp dirs on exception path: {leaked}"
