@@ -20,8 +20,19 @@ Stdlib only. Swap in scipy/bootstrap for heavier use; the t-table below is the
 one-sided 95% critical value t_{0.95, df}.
 """
 from __future__ import annotations
+import math
 import statistics
 from dataclasses import dataclass
+
+
+def _finite(*vals: float) -> bool:
+    """True only if every value is a real, finite number. The gate is the JUDGE:
+    a non-finite score (NaN/inf from a broken measurement or an evolved solver)
+    must FAIL CLOSED, never crash the loop or sneak a promotion through."""
+    try:
+        return all(isinstance(v, (int, float)) and math.isfinite(v) for v in vals)
+    except TypeError:
+        return False
 
 # one-sided 95% t critical values, df -> t_{0.95, df}
 _T95 = {1: 6.314, 2: 2.920, 3: 2.353, 4: 2.132, 5: 2.015, 6: 1.943, 7: 1.895,
@@ -72,6 +83,8 @@ def paired_confirm(candidate_runs: list[float], parent_runs: list[float],
     if n == 0:
         return False
     diffs = [c - p for c, p in zip(candidate_runs[:n], parent_runs[:n])]
+    if not _finite(margin, *candidate_runs[:n], *parent_runs[:n]):
+        return False                        # fail closed on NaN/inf samples
     mean = statistics.fmean(diffs)
     if n == 1:
         return mean > margin
@@ -103,6 +116,11 @@ def should_promote(cand: Score, parent: Score, *,
     anchor_ok = ground-truth anchor set did not regress (Goodhart guard).
     """
     if not anchor_ok:
+        return False
+    # JUDGE invariant: reject non-finite inputs outright (fail closed, no crash).
+    if not _finite(cand.correct, cand.efficiency, parent.correct, parent.efficiency,
+                   candidate_dev, parent_dev, sigma, sigma_mult,
+                   *candidate_runs, *parent_runs):
         return False
     if not passes_cheap_screen(candidate_dev, parent_dev, regression_ok):
         return False

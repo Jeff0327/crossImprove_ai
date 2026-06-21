@@ -596,3 +596,57 @@ def test_no_tempdir_leak_on_exception_path():
     sandbox.verify("def check(s):\n    raise RuntimeError('boom')", "x")
     leaked = _sbx_dirs() - before
     assert leaked == set(), f"leaked temp dirs on exception path: {leaked}"
+
+
+# --- [16] re-verification round 2: gate fails closed on non-finite inputs -----
+# Same class as the verdict-spoof finding: an unexpected value subverting the
+# JUDGE. A NaN/inf fitness (broken measurement or an evolved solver) used to
+# CRASH gate math; it must fail closed (no promotion), never raise.
+
+import math as _math
+
+
+def test_gate_fails_closed_on_nan_fitness():
+    nan = float("nan")
+    assert gate.should_promote(
+        gate.Score(nan, 0.0), gate.Score(0.0, 0.0),
+        candidate_dev=nan, parent_dev=0.0, regression_ok=True,
+        candidate_runs=[nan] * 4, parent_runs=[0.0] * 4,
+        anchor_ok=True, sigma=0.0) is False
+
+
+def test_gate_fails_closed_on_inf_fitness():
+    inf = float("inf")
+    assert gate.should_promote(
+        gate.Score(inf, 0.0), gate.Score(0.0, 0.0),
+        candidate_dev=inf, parent_dev=0.0, regression_ok=True,
+        candidate_runs=[inf] * 4, parent_runs=[0.0] * 4,
+        anchor_ok=True, sigma=0.0) is False
+
+
+def test_paired_confirm_rejects_nonfinite_samples():
+    nan = float("nan")
+    assert gate.paired_confirm([nan, nan, nan, nan], [0.0, 0.0, 0.0, 0.0]) is False
+    assert gate.paired_confirm([1.0, 1.0], [float("inf"), 0.0]) is False
+
+
+def test_gate_still_promotes_clean_finite_win_after_guard():
+    # the fail-closed guard must not block legitimate finite improvements
+    assert gate.should_promote(
+        gate.Score(1.0, 0.0), gate.Score(0.0, 0.0),
+        candidate_dev=1.0, parent_dev=0.0, regression_ok=True,
+        candidate_runs=[1.0] * 4, parent_runs=[0.0] * 4,
+        anchor_ok=True, sigma=0.0) is True
+
+
+def test_verdict_spoof_via_sigkill_is_rejected():
+    # G1 sibling: kill self with SIGKILL instead of os._exit after writing a fake
+    # result. The nonce check must still reject it.
+    spoof = (
+        "def check(s):\n"
+        "    import os, json, signal\n"
+        "    open(os.environ['RESULT_FD_PATH'], 'w').write(json.dumps({'ok': True}))\n"
+        "    os.kill(os.getpid(), signal.SIGKILL)\n"
+        "    return False\n"
+    )
+    assert sandbox.verify(spoof, "x")["ok"] is False
